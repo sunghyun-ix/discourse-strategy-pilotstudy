@@ -95,7 +95,6 @@ st.markdown("""
     .main-title { font-size: 2.2rem; font-weight: 700; text-align: center; color: #1E1E1E; margin-bottom: 10px; }
     .phase-header { font-size: 1.5rem; font-weight: 600; color: #0068C9; margin-bottom: 20px; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 10px; }
     .instruction-box { background-color: #f8f9fa; padding: 25px; border-radius: 10px; border: 1px solid #ddd; margin-bottom: 20px; line-height: 1.6; }
-    .stTextArea textarea { font-size: 1.1rem !important; line-height: 1.6 !important; font-family: 'Arial', sans-serif !important; height: 500px !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -104,8 +103,6 @@ if "participant_id" not in st.session_state: st.session_state.participant_id = N
 if "assigned_group" not in st.session_state: st.session_state.assigned_group = None
 if "current_phase" not in st.session_state: st.session_state.current_phase = "Login"
 if "messages" not in st.session_state: st.session_state.messages = []
-# (Pilot) story_content는 쓰지 않지만 에러 방지용으로 남겨둡니다.
-if "story_content" not in st.session_state: st.session_state.story_content = ""
 
 # =========================================================
 # [CONTENT SETTINGS] - System Prompts & Images
@@ -147,19 +144,18 @@ Action: Question the user's assumptions and engage in critical dialogue to valid
 Action: Work with the user to build a common understanding of the story and the best methods for tackling the creative process. 
 """
 
-# 2. Baseline AI Prompt (Non-Discourse / Control) - [empty]
+# 2. Baseline AI Prompt (Non-Discourse / Control)
 SYS_PROMPT_BASELINE = ""
 
-# 3. Guideline Images (Filename Check Required!)
+# 3. Guideline Images (Pilot Version - All participants read guidelines)
 IMAGES_EXP = ["Discourse_page1.png", "Discourse_page2.png", "Discourse_page3.png"]
-IMAGES_CTRL = ["Discourse_absent_page1.png"] 
 
-# [GROUP DEFINITION] 
+# [GROUP DEFINITION - PILOT VERSION] 
+# G1: AI uses Strategy | G2: AI does NOT use Strategy (Control) | G3: Extra Control slot if needed
 GROUPS = {
-    "G1": {"type": "Instructed_Strategic", "guide": IMAGES_EXP,  "sys_prompt": SYS_PROMPT_STRATEGIC},
-    "G2": {"type": "Instructed_Baseline",  "guide": IMAGES_EXP,  "sys_prompt": SYS_PROMPT_BASELINE},
-    "G3": {"type": "Neutral_Strategic",    "guide": IMAGES_CTRL, "sys_prompt": SYS_PROMPT_STRATEGIC},
-    "G4": {"type": "Neutral_Baseline",     "guide": IMAGES_CTRL, "sys_prompt": SYS_PROMPT_BASELINE},
+    "G1": {"type": "Human_Trained_&_AI_Trained",     "guide": IMAGES_EXP, "sys_prompt": SYS_PROMPT_STRATEGIC},
+    "G2": {"type": "Human_Trained_&_AI_NOT_Trained", "guide": IMAGES_EXP, "sys_prompt": SYS_PROMPT_BASELINE},
+    "G3": {"type": "Human_Trained_&_AI_Control",     "guide": IMAGES_EXP, "sys_prompt": SYS_PROMPT_BASELINE},
 }
 
 # =========================================================
@@ -190,11 +186,190 @@ with st.sidebar:
         st.markdown("---")
         st.markdown("### 🕹️ Controls")
         
-        # delete writing phase 
+        # Writing phase removed for Pilot
         phase_options = ["Login", "Phase 0: Instruction", "Phase 1: Brainstorming", "Submission"]
         try: idx = phase_options.index(st.session_state.current_phase)
         except: idx = 0
         new_phase = st.selectbox("Force Phase Jump:", phase_options, index=idx)
         if st.button("Go to Phase"):
             st.session_state.current_phase = new_phase
-            if "phase_start_time" in st
+            if "phase_start_time" in st.session_state:
+                del st.session_state.phase_start_time
+            st.rerun()
+            
+        st.markdown("---")
+        st.markdown("### 💾 Data Management")
+        
+        if st.session_state.participant_id:
+            log_data = {
+                "participant_id": st.session_state.participant_id,
+                "assigned_group": st.session_state.assigned_group,
+                "condition_detail": GROUPS[st.session_state.assigned_group]['type'],
+                "chat_history": st.session_state.messages
+            }
+            json_str = json.dumps(log_data, indent=2, ensure_ascii=False)
+            file_name = f"PILOT_LOG_{st.session_state.participant_id}_{st.session_state.assigned_group}.json"
+            
+            st.download_button(
+                label="📥 Download Log JSON",
+                data=json_str,
+                file_name=file_name,
+                mime="application/json",
+                type="primary"
+            )
+
+        st.markdown("---")
+        if st.button("⚠️ RESET FOR NEXT PARTICIPANT", type="primary"):
+            st.session_state.clear()
+            st.rerun()
+
+# =========================================================
+# [MAIN FLOW]
+# =========================================================
+
+# --- AUTO LOGIN CHECK (URL PARAMETER) ---
+query_params = st.query_params
+if "PID" in query_params and st.session_state.participant_id is None:
+    p_id_from_url = query_params["PID"]
+    st.session_state.participant_id = p_id_from_url
+    st.session_state.assigned_group = random.choice(list(GROUPS.keys()))
+    st.session_state.current_phase = "Phase 0: Instruction"
+    
+    if "phase_start_time" in st.session_state: del st.session_state.phase_start_time
+    st.rerun()
+
+# --- STEP 1: LOGIN ---
+if st.session_state.current_phase == "Login":
+    st.markdown("<div class='main-title'>🧪 Sci-Fi Brainstorming Pilot</div>", unsafe_allow_html=True)
+    st.info("Waiting for Qualtrics redirection...")
+    st.caption("(If you are testing manually, enter ID below)")
+    
+    with st.form("login_form"):
+        p_id = st.text_input("Participant ID (e.g., P01):")
+        submitted = st.form_submit_button("Start Experiment")
+        
+        if submitted and p_id:
+            st.session_state.participant_id = p_id
+            st.session_state.assigned_group = random.choice(list(GROUPS.keys()))
+            st.session_state.current_phase = "Phase 0: Instruction"
+            if "phase_start_time" in st.session_state: del st.session_state.phase_start_time
+            st.rerun()
+
+# --- STEP 2: INSTRUCTION ---
+elif st.session_state.current_phase == "Phase 0: Instruction":
+    init_phase_timer()
+    show_timer(5, "Reading Time")
+    
+    st.markdown(f"<div class='phase-header'>Step 1: Guidelines (5 min)</div>", unsafe_allow_html=True)
+    
+    group_settings = GROUPS[st.session_state.assigned_group]
+    
+    try:
+        images_to_show = group_settings['guide']
+        if isinstance(images_to_show, list):
+            for img_file in images_to_show:
+                st.image(img_file, use_column_width=True)
+        else:
+            st.image(images_to_show, use_column_width=True)
+    except Exception as e:
+        st.error(f"🚨 Image load error: {e}")
+    
+    st.write("")
+    st.info("Please read the instructions carefully. Click below when ready.")
+    
+    if st.button("Start Brainstorming (Go to Step 2) 👉"):
+        st.session_state.current_phase = "Phase 1: Brainstorming"
+        if "phase_start_time" in st.session_state: del st.session_state.phase_start_time
+        st.rerun()
+
+# --- STEP 3: BRAINSTORMING (10 Min) - DUAL SCREEN ---
+elif st.session_state.current_phase == "Phase 1: Brainstorming":
+    init_phase_timer()
+    DURATION_MIN = 10 
+    show_timer(DURATION_MIN, "Brainstorming")
+    
+    st.markdown(f"<div class='phase-header'>Step 2: Brainstorming with AI ({DURATION_MIN} min)</div>", unsafe_allow_html=True)
+    
+    group_settings = GROUPS[st.session_state.assigned_group]
+    
+    # [DUAL SCREEN LAYOUT] Left: Chat (1.2) | Right: Guidelines (1)
+    col_chat, col_guide = st.columns([1.2, 1], gap="large")
+    
+    with col_chat:
+        st.info("💬 Chat with AI")
+        chat_container = st.container(height=600)
+        with chat_container:
+            for msg in st.session_state.messages:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+                    
+    with col_guide:
+        st.success("📖 Guidelines Reference")
+        guide_container = st.container(height=600)
+        with guide_container:
+            try:
+                images_to_show = group_settings['guide']
+                for img_file in images_to_show:
+                    st.image(img_file, use_column_width=True)
+            except Exception as e:
+                st.error(f"🚨 Image load error: {e}")
+
+    # Chat Input Box
+    if prompt := st.chat_input("Brainstorm ideas here..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        with chat_container:
+            with st.chat_message("user"): 
+                st.markdown(prompt)
+
+            messages_payload = [{"role": "system", "content": group_settings["sys_prompt"]}] + st.session_state.messages
+            
+            with st.chat_message("assistant"):
+                with st.spinner("AI is thinking..."):
+                    try:
+                        response = client.chat.completions.create(
+                            model=MODEL_VERSION,
+                            messages=messages_payload,
+                            temperature=0.7,
+                            max_tokens=400
+                        )
+                        ai_msg = response.choices[0].message.content
+                        st.markdown(ai_msg)
+                        st.session_state.messages.append({"role": "assistant", "content": ai_msg})
+                    except Exception as e:
+                        st.error(f"API Error: {e}")
+
+    st.markdown("---")
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col3:
+        # qualtrics submit
+        if st.button("Finish Brainstorming & Go to Survey 👉", type="primary", use_container_width=True):
+            st.session_state.current_phase = "Submission"
+            if "phase_start_time" in st.session_state: del st.session_state.phase_start_time
+            st.rerun()
+
+# --- STEP 4: SUBMISSION (Direct redirect to Qualtrics) ---
+elif st.session_state.current_phase == "Submission":
+    st.markdown("<div class='main-title'>🎉 Brainstorming Completed!</div>", unsafe_allow_html=True)
+    st.success("Your brainstorming session has been recorded.")
+    
+    # pilot link 
+    qualtrics_base_url = "https://iu.co1.qualtrics.com/jfe/form/SV_72tlOVEzYQ16Swu"
+    final_link = f"{qualtrics_base_url}?PID={st.session_state.participant_id}&GROUP={st.session_state.assigned_group}"
+    
+    st.markdown(f"""
+        <div style="background-color:#e8f4fd; padding:30px; border-radius:10px; text-align:center; margin-top:20px;">
+            <h3>👇 Final Step</h3>
+            <p style="font-size:1.1rem;">Please click the link below to complete the measurement survey.</p>
+            <br>
+            <a href="{final_link}" target="_blank" style="
+                background-color: #0068C9; color: white; padding: 18px 30px; 
+                text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 1.3rem; 
+                box-shadow: 0px 4px 6px rgba(0,0,0,0.1);">
+                Go to Post-Survey 🔗
+            </a>
+            <br><br>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    st.warning("Please notify the researcher that you have finished.")
